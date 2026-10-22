@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 bronze/
 warehouse.duckdb
+# Instance Dagster temporaire créée par `dagster dev` (bonus)
+.tmp_dagster_home_*/

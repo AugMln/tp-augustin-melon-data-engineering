@@ -1,0 +1,10 @@
+# Configuration de l'instance Dagster (bonus) : `dagster dev`, lancé depuis la racine du repo,
+# reprend ce fichier.
+concurrency:
+  pools:
+    # warehouse.duckdb n'accepte qu'un écrivain à la fois : une seule étape du pool `duckdb`
+    # (silver, gold, init_load) s'exécute à un instant donné, tous runs confondus.
+    default_limit: 1
+
+telemetry:
+  enabled: false

@@ -54,6 +54,11 @@ Les squelettes de `ingestion/` sont à compléter : `fetch_csv`, les 4 `ingest_b
 - Un asset par entité et par couche (`bronze_flights`, `silver_flights`, `gold_flights`…), qui appelle les fonctions existantes. Les `deps` reproduisent l'ordre de `run_month.py` : silver_bookings après les silver des dimensions, gold_bookings après gold_flights/gold_passengers.
 - Un job `init` non partitionné, pour `dim_currency` et le jour init.
 - Point d'attention : le SCD2 et la désactivation supposent que les jours sont traités **dans l'ordre**. Le backfill doit donc être séquentiel (`BackfillPolicy` en un seul run, ou concurrence limitée à 1 via la tag concurrency). À documenter.
+  - Implémenté : chaque `silver_*` du jour D a une **auto-dépendance** sur son jour D-1 (`TimeWindowPartitionMapping(start_offset=-1, end_offset=-1)`), et tous les assets qui écrivent dans DuckDB sont dans le **pool `duckdb` limité à 1** (`dagster.yaml` à la racine), un seul écrivain étant possible sur le fichier. Le bronze reste hors pool. `in_process_executor`. L'init est un asset non partitionné `init_load`, en amont des bronze.
+  - Révisé après un 1er test : avec des gold partitionnés et un run par jour, le daemon faisait passer tous les silver avant les gold (partition gold « du jour J » fausse), avec environ 30 s par run (plus de 25 min estimées). Désormais :
+    - **gold non partitionnés** : un rebuild complet depuis le silver courant, après toutes ses partitions ;
+    - bronze/silver en **`BackfillPolicy.single_run()`**, la fonction bouclant sur `context.partition_keys` triés ;
+    - assets annotés `-> None` (pas d'IO manager, qui échoue sur un run multi-partitions).
 - Ajouter `dagster` et `dagster-webserver` à `requirements.txt`, avec un commentaire indiquant que c'est pour le bonus.
 
 ### 5. `DOCUMENTATION.md`
@@ -77,7 +82,7 @@ Contenu :
    - Helpers génériques dans `common.py` : `update_scd2_history` (clôture/ouverture par `row_hash`), `is_stale_snapshot` / `log_snapshot` (table `silver_load_log` : un snapshot antérieur au dernier chargé est ignoré, ce qui règle le rejeu de l'init de `run_month.py`).
    - `flight_sk` / `passenger_sk` = `version_id` de l'historique (séquence) : clés stables d'une reconstruction gold à l'autre. Validité `[valid_from, valid_to[`, `valid_to` NULL pour la version courante. Les réservations antérieures à la version 1 (464 réservations d'août, avant le snapshot init) sont rattachées à la version 1.
    - Vérifié : l'état reconstitué depuis l'historique = le snapshot source pour les 31 jours ; 735 versions / 714 vols (21 multi-versions), 2232 / 2221 passagers (11) ; 0 chevauchement ; 0 sk NULL ou orpheline ; `airport_id` = origine de la version réservée ; 2e exécution → seule `silver_load_log` bouge (après l'alignement d'airports, fait dans un commit séparé : garde-fou + `DO UPDATE ... WHERE`).
-5. Dagster.
+5. ✅ Dagster. Backfill complet (init + 30 jours) lancé via l'API GraphQL de `dagster dev` sur un entrepôt vide : 4 runs, tous réussis, en 150 s. L'entrepôt obtenu est **identique** à celui de `run_month.py` sur les 14 tables (hors timestamps), clés SCD2 comprises. Le rejeu d'une partition passée (15/09) ne modifie rien.
 6. `DOCUMENTATION.md`, puis commits par jalon.
 
 ## Vérification

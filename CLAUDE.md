@@ -20,6 +20,9 @@ cd ingestion
 python run_month.py          # pipeline complet : dim_currency + init + 30 jours de septembre 2025
 python ingest_airports.py    # init d'une seule entité (chaque script a un __main__ -> init())
 
+# Bonus Dagster (depuis la racine ; dagster.yaml y limite le pool `duckdb` à 1)
+dagster dev -f dagster_pipeline/definitions.py   # UI : Materialize all, 30 partitions
+
 # Repartir de zéro
 Remove-Item ..\warehouse.duckdb, ..\bronze -Recurse -Force
 ```
