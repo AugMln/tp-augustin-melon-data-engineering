@@ -83,7 +83,7 @@ Contenu :
    - `flight_sk` / `passenger_sk` = `version_id` de l'historique (séquence) : clés stables d'une reconstruction gold à l'autre. Validité `[valid_from, valid_to[`, `valid_to` NULL pour la version courante. Les réservations antérieures à la version 1 (464 réservations d'août, avant le snapshot init) sont rattachées à la version 1.
    - Vérifié : l'état reconstitué depuis l'historique = le snapshot source pour les 31 jours ; 735 versions / 714 vols (21 multi-versions), 2232 / 2221 passagers (11) ; 0 chevauchement ; 0 sk NULL ou orpheline ; `airport_id` = origine de la version réservée ; 2e exécution → seule `silver_load_log` bouge (après l'alignement d'airports, fait dans un commit séparé : garde-fou + `DO UPDATE ... WHERE`).
 5. ✅ Dagster. Backfill complet (init + 30 jours) lancé via l'API GraphQL de `dagster dev` sur un entrepôt vide : 4 runs, tous réussis, en 150 s. L'entrepôt obtenu est **identique** à celui de `run_month.py` sur les 14 tables (hors timestamps), clés SCD2 comprises. Le rejeu d'une partition passée (15/09) ne modifie rien.
-6. `DOCUMENTATION.md`, puis commits par jalon.
+6. ✅ `DOCUMENTATION.md` (constats sur les données, stratégie par fichier, faits/dimensions, mises à jour, suppressions, SCD2, Dagster, limites, diagramme Mermaid `erDiagram` dont le rendu a été vérifié avec mermaid-cli). Contrôle « clone propre » : `bronze/` et `warehouse.duckdb` supprimés, puis `run_month.py` → 155 fichiers bronze retéléchargés, 58 s, contrôles OK.
 
 ## Vérification
 - `cd ingestion; python run_month.py` depuis un clone propre (après suppression de `bronze/` et `warehouse.duckdb`) doit tourner sans erreur.
