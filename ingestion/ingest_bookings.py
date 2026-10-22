@@ -80,19 +80,30 @@ def build_fact_booking(con):
     # Grain : une ligne par réservation. Les clés étrangères pointent vers dim_passenger,
     # dim_flight, dim_airport, dim_date et dim_currency, toutes reconstruites avant ce gold
     # (bookings est la dernière entité de run_month.py).
+    # passenger_sk / flight_sk : la VERSION (SCD2) du passager et du vol valide à la date de
+    # réservation, i.e. valid_from <= booking_date < valid_to. Les réservations antérieures à la
+    # première version connue (celles d'août, avant le snapshot init du 2025-08-31) sont
+    # rattachées à la version 1, le plus ancien état disponible. passenger_id / flight_id sont
+    # gardés en plus, pour joindre directement sur la clé métier (toutes versions confondues).
     # airport_id est celui enregistré dans la réservation : il est égal à l'aéroport de départ
     # du vol réservé (vérifié sur tout le dataset).
     # amount_eur : conversion au taux fixe de dim_currency, arrondie au centime.
     # Âge et tranche d'âge AU MOMENT DE LA RÉSERVATION (et non à la date de référence de
-    # dim_passenger) : c'est ce qui a du sens pour analyser le CA par tranche d'âge.
+    # dim_passenger), avec la date de naissance de la version valide à cette date.
     # Les timestamps sont ceux de silver_bookings : une réservation est immuable, ses
     # timestamps ne bougent donc pas d'une reconstruction à l'autre.
     # LEFT JOIN : une réservation n'est jamais perdue, même si une dimension manquait.
     age = age_sql("p.birth_date", "b.booking_date")
+    valid_at_booking = """
+        AND b.booking_date < coalesce({d}.valid_to, DATE '9999-12-31')
+        AND (b.booking_date >= {d}.valid_from OR {d}.version_number = 1)
+    """
     con.execute(f"""
         CREATE OR REPLACE TABLE fact_booking AS
         SELECT
             b.booking_id,
+            p.passenger_sk,
+            f.flight_sk,
             b.passenger_id,
             b.flight_id,
             b.airport_id,
@@ -108,7 +119,8 @@ def build_fact_booking(con):
             b.insert_timestamp,
             b.update_timestamp
         FROM silver_bookings b
-        LEFT JOIN dim_passenger p ON p.passenger_id = b.passenger_id
+        LEFT JOIN dim_passenger p ON p.passenger_id = b.passenger_id {valid_at_booking.format(d='p')}
+        LEFT JOIN dim_flight f ON f.flight_id = b.flight_id {valid_at_booking.format(d='f')}
         LEFT JOIN dim_currency c ON c.currency = b.currency
     """)
 
@@ -168,6 +180,7 @@ def build_agg_revenue_daily_airline(con):
     # Table d'agrégation : CA (EUR) et nombre de réservations par jour de réservation et par
     # compagnie. Construite ici, après fact_booking, parce que bookings est la dernière entité
     # traitée chaque jour : le fait et toutes les dimensions sont alors à jour.
+    # La compagnie est celle de la version du vol valide à la date de réservation (flight_sk).
     # Timestamps : première insertion et dernière mise à jour parmi les réservations agrégées.
     con.execute("""
         CREATE OR REPLACE TABLE agg_revenue_daily_airline AS
@@ -180,7 +193,7 @@ def build_agg_revenue_daily_airline(con):
             min(fb.insert_timestamp) AS insert_timestamp,
             max(fb.update_timestamp) AS update_timestamp
         FROM fact_booking fb
-        JOIN dim_flight f ON f.flight_id = fb.flight_id
+        JOIN dim_flight f ON f.flight_sk = fb.flight_sk
         GROUP BY fb.booking_date, fb.date_key, f.airline
     """)
 

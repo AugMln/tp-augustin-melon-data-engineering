@@ -57,4 +57,4 @@ Faits observés sur le dataset (cf. aussi son `README.md`) qui conditionnent le 
 - ~28 % des vols arrivent « avant » leur départ (vols de nuit) : durée = +1440 min si négative.
 - Données propres (pas de nulls ni doublons) ; lire les CSV en `dtype=str` et typer en silver.
 
-Décisions : agrégat `agg_revenue_daily_airline` construit dans `ingest_bookings.ingest_gold` ; âge calculé à la date de réservation dans le fait (et au 2025-09-30 dans `dim_passenger`) ; bonus SCD2 (tables `silver_*_history`, dims gold versionnées) et Dagster visés tous les deux — le SCD2 suppose un rejeu des jours **dans l'ordre**.
+Décisions : agrégat `agg_revenue_daily_airline` construit dans `ingest_bookings.ingest_gold` ; âge calculé à la date de réservation dans le fait (et au 2025-09-30 dans `dim_passenger`) ; bonus SCD2 (tables `silver_*_history`, dims gold versionnées) et Dagster visés tous les deux — le SCD2 suppose un rejeu des jours **dans l'ordre** : `silver_load_log` (helpers `is_stale_snapshot` / `log_snapshot` de `common.py`) fait ignorer à flights/passengers tout snapshot antérieur au dernier chargé.

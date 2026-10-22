@@ -73,7 +73,10 @@ Contenu :
 2. ✅ Silver flights + passengers + bookings (sans SCD2). Testé en bronze+silver seuls (le gold n'existe pas encore) : état actif au 30/09 = snapshot du 30/09, rejeu d'un jour sans effet (timestamps compris), rejeu complet → contenu identique.
    - ⚠️ Constat pour le jalon 4 : relancer `run_month.py` rejoue l'init **après** le 30/09, ce qui réactive puis re-désactive temporairement des lignes (les timestamps bougent, le contenu final est identique). Avec le SCD2, ce rejeu créerait des versions parasites : il faudra ignorer un snapshot antérieur ou égal au dernier snapshot déjà traité.
 3. ✅ Gold (dims + fact + agrégat, version simple sans SCD2, clés naturelles). `run_month.py` complet ×2 sans erreur. 38 930 réservations, 0 doublon, 0 FK orpheline, durées entre 60 et 780 min, 81 aéroports actifs, 696 vols actifs / 714, CA fait = CA agrégat.
-4. SCD2 (historique silver + dims gold versionnées + jointure temporelle dans le fait).
+4. ✅ SCD2 (historique silver + dims gold versionnées + jointure temporelle dans le fait).
+   - Helpers génériques dans `common.py` : `update_scd2_history` (clôture/ouverture par `row_hash`), `is_stale_snapshot` / `log_snapshot` (table `silver_load_log` : un snapshot antérieur au dernier chargé est ignoré, ce qui règle le rejeu de l'init de `run_month.py`).
+   - `flight_sk` / `passenger_sk` = `version_id` de l'historique (séquence) : clés stables d'une reconstruction gold à l'autre. Validité `[valid_from, valid_to[`, `valid_to` NULL pour la version courante. Les réservations antérieures à la version 1 (464 réservations d'août, avant le snapshot init) sont rattachées à la version 1.
+   - Vérifié : l'état reconstitué depuis l'historique = le snapshot source pour les 31 jours ; 735 versions / 714 vols (21 multi-versions), 2232 / 2221 passagers (11) ; 0 chevauchement ; 0 sk NULL ou orpheline ; `airport_id` = origine de la version réservée ; 3e exécution → seules `silver_load_log` et airports (code fourni, sans garde) bougent, et seulement leurs timestamps.
 5. Dagster.
 6. `DOCUMENTATION.md`, puis commits par jalon.
 

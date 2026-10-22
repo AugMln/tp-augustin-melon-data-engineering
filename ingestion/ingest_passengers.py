@@ -6,11 +6,15 @@ Les passagers viennent de deux systèmes sources aux formats différents :
 - EN : colonnes en anglais, genre `Male/Female`, dates ISO `YYYY-MM-DD` ;
 - FR : colonnes en français, genre `Homme/Femme`, dates `DD/MM/YYYY`.
 Les ids sont disjoints entre les deux systèmes. Chacun exporte un snapshot COMPLET de ses passagers.
-Silver = un schéma unique (union normalisée EN + FR), upsert + désactivation.
+Silver = un schéma unique (union normalisée EN + FR), upsert + désactivation, plus un historique
+SCD2 (silver_passengers_history) d'où le gold tire une dimension versionnée.
 """
 from datetime import date
 
-from common import age_group_sql, age_sql, fetch_csv, get_connection
+from common import (
+    age_group_sql, age_sql, fetch_csv, get_connection, is_stale_snapshot, log_snapshot,
+    update_scd2_history,
+)
 
 # Les passagers viennent de deux systèmes sources, chacun avec son propre export.
 SOURCES = ["en", "fr"]
@@ -56,6 +60,28 @@ def create_silver_table(con):
             update_timestamp TIMESTAMP
         )
     """)
+    # Historique SCD2 (bonus), même principe que silver_flights_history (cf. ingest_flights.py).
+    con.execute("CREATE SEQUENCE IF NOT EXISTS seq_silver_passengers_history")
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS silver_passengers_history (
+            version_id BIGINT PRIMARY KEY DEFAULT nextval('seq_silver_passengers_history'),
+            passenger_id VARCHAR,
+            first_name VARCHAR,
+            last_name VARCHAR,
+            gender VARCHAR,
+            nationality VARCHAR,
+            email VARCHAR,
+            birth_date DATE,
+            signup_date DATE,
+            source_system VARCHAR,
+            row_hash VARCHAR,
+            valid_from DATE,
+            valid_to DATE,
+            is_current BOOLEAN,
+            insert_timestamp TIMESTAMP,
+            update_timestamp TIMESTAMP
+        )
+    """)
 
 
 def ingest_silver(day: date = None, init: bool = False):
@@ -66,6 +92,9 @@ def ingest_silver(day: date = None, init: bool = False):
 
     con = get_connection()
     create_silver_table(con)
+    if is_stale_snapshot(con, "silver_passengers", snapshot_date):
+        con.close()
+        return
     con.register("snapshot_en", df_en)
     con.register("snapshot_fr", df_fr)
 
@@ -117,27 +146,36 @@ def ingest_silver(day: date = None, init: bool = False):
         [snapshot_date],
     )
 
+    update_scd2_history(con, "silver_passengers_history", "passenger_id", PASSENGER_COLS, snapshot_date)
+    log_snapshot(con, "silver_passengers", snapshot_date)
+
     con.unregister("snapshot_en")
     con.unregister("snapshot_fr")
     con.close()
 
 
 def ingest_gold():
-    """Reconstruit dim_passenger à partir de l'état courant de silver_passengers."""
+    """Reconstruit dim_passenger (SCD2 : une ligne par version) à partir de silver_passengers_history."""
     con = get_connection()
+    # Une ligne par VERSION de passager (passenger_sk), cf. dim_flight pour is_current / is_active.
     # L'âge dépend de la date à laquelle on le calcule : ici une date de référence FIXE (fin de
     # la période couverte) plutôt que current_date, pour que le gold reste reproductible. L'âge
     # au moment de chaque réservation, lui, est calculé dans fact_booking.
-    age = age_sql("birth_date", f"DATE '{AGE_REFERENCE_DATE.isoformat()}'")
+    age = age_sql("h.birth_date", f"DATE '{AGE_REFERENCE_DATE.isoformat()}'")
     con.execute(f"""
         CREATE OR REPLACE TABLE dim_passenger AS
         SELECT
-            passenger_id, first_name, last_name, gender, nationality, email,
-            birth_date, signup_date, source_system,
+            h.version_id AS passenger_sk,
+            h.passenger_id, h.first_name, h.last_name, h.gender, h.nationality, h.email,
+            h.birth_date, h.signup_date, h.source_system,
             {age} AS age,
             {age_group_sql(age)} AS age_group,
-            is_active, deleted_date, insert_timestamp, update_timestamp
-        FROM silver_passengers
+            row_number() OVER (PARTITION BY h.passenger_id ORDER BY h.valid_from, h.version_id) AS version_number,
+            h.valid_from, h.valid_to, h.is_current,
+            s.is_active, s.deleted_date,
+            h.insert_timestamp, h.update_timestamp
+        FROM silver_passengers_history h
+        JOIN silver_passengers s ON s.passenger_id = h.passenger_id
     """)
     con.close()
 
