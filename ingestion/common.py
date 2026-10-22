@@ -1,8 +1,9 @@
 """
-Utilitaires partagés par les scripts d'ingestion. `get_connection` est fourni tel quel ;
-`fetch_csv` est à vous d'implémenter (cf. TODO)
+Utilitaires partagés par les scripts d'ingestion : `fetch_csv` (téléchargement vers bronze/ puis
+relecture depuis le disque) et `get_connection`.
 """
 import os
+import urllib.request
 
 import duckdb
 import pandas as pd
@@ -14,12 +15,28 @@ RAW_BASE = "https://raw.githubusercontent.com/kevinl75/tp-polytech-dataset/main"
 
 
 def fetch_csv(subdir: str, filename: str) -> pd.DataFrame:
-    """Doit renvoyer le contenu de <subdir>/<filename> sous forme de DataFrame pandas."""
-    # TODO : le fichier CSV source est disponible à l'URL f"{RAW_BASE}/{subdir}/{filename}".
-    # - S'il n'existe pas déjà en local dans BRONZE_DIR/<subdir>/<filename>, téléchargez-le et
-    #   écrivez-le tel quel sur disque à cet emplacement (créez les dossiers nécessaires).
-    # - Eviter si possible de le retéléchargez s'il est déjà présent.
-    raise NotImplementedError
+    """Renvoie le contenu de <subdir>/<filename> sous forme de DataFrame pandas.
+
+    Le fichier est téléchargé dans BRONZE_DIR/<subdir>/<filename> s'il n'y est pas déjà, puis
+    toujours relu depuis le disque : bronze = copie brute et immuable de la source.
+    """
+    local_dir = os.path.join(BRONZE_DIR, subdir)
+    local_path = os.path.join(local_dir, filename)
+    os.makedirs(local_dir, exist_ok=True)
+
+    if not os.path.exists(local_path):
+        # Octets copiés à l'identique (pas de passage par pandas, qui réécrirait le fichier).
+        # Écriture dans un .tmp puis renommage : un téléchargement interrompu ne laisse jamais
+        # un fichier tronqué que les exécutions suivantes prendraient pour un fichier complet.
+        tmp_path = local_path + ".tmp"
+        with urllib.request.urlopen(f"{RAW_BASE}/{subdir}/{filename}") as resp:
+            content = resp.read()
+        with open(tmp_path, "wb") as f:
+            f.write(content)
+        os.replace(tmp_path, local_path)
+
+    # Tout en chaîne de caractères : le typage est la responsabilité du silver.
+    return pd.read_csv(local_path, dtype=str)
 
 
 def get_connection() -> duckdb.DuckDBPyConnection:
