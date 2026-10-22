@@ -12,7 +12,7 @@ directement d'un objet Python de l'étape d'avant.
 """
 from datetime import date
 
-from common import fetch_csv, get_connection
+from common import fetch_csv, get_connection, is_stale_snapshot, log_snapshot
 
 AIRPORT_COLS = ["iata_code", "airport_name", "city", "country"]
 
@@ -62,18 +62,29 @@ def ingest_silver(day: date = None, init: bool = False):
 
     con = get_connection()
     create_silver_table(con)
+    # Modifié par rapport au modèle fourni : comme pour flights/passengers, un snapshot plus
+    # ancien que le dernier chargé est ignoré. Sinon, relancer run_month.py (qui repasse par
+    # l'init) désactiverait temporairement l'aéroport ajouté en septembre, avec une
+    # deleted_date au 2025-08-31.
+    if is_stale_snapshot(con, "silver_airports", snapshot_date):
+        con.close()
+        return
     con.register("snapshot", df)
 
     # Upsert : on insère les nouvelles lignes, on met à jour celles dont la clé existe déjà.
     # insert_timestamp n'apparaît PAS dans le SET du conflit : sur un conflit (ligne déjà
     # connue), on veut garder sa valeur d'origine, pas l'écraser. update_timestamp, lui, est
-    # rafraîchi à chaque passage, qu'il y ait eu un vrai changement de valeur ou non.
+    # rafraîchi à chaque vrai changement de valeur (cf. la clause WHERE ajoutée ci-dessous).
     # deleted_date est remis à NULL sur un conflit : la ligne est présente dans le snapshot du
     # jour, donc active — si elle avait été désactivée puis réapparaissait (pas le cas dans ce
     # jeu de données, mais une vraie source pourrait le faire), elle redevient active proprement.
     update_cols = AIRPORT_COLS + ["is_active"]
     set_clause = ", ".join(f"{c} = excluded.{c}" for c in update_cols)
     set_clause += ", deleted_date = NULL, update_timestamp = now()"
+    # Modifié par rapport au modèle fourni : le DO UPDATE n'est appliqué que si la ligne a
+    # réellement changé (ou si elle était désactivée), comme pour flights/passengers.
+    # update_timestamp date ainsi le dernier vrai changement, et rejouer un jour ne touche rien.
+    changed = " OR ".join(f"silver_airports.{c} IS DISTINCT FROM excluded.{c}" for c in update_cols)
 
     con.execute(f"""
         INSERT INTO silver_airports (
@@ -82,6 +93,7 @@ def ingest_silver(day: date = None, init: bool = False):
         SELECT airport_id, {", ".join(update_cols)}, NULL, now(), now()
         FROM snapshot
         ON CONFLICT (airport_id) DO UPDATE SET {set_clause}
+        WHERE {changed}
     """)
 
     # Les aéroports absents du snapshot du jour ont disparu de la source : on les désactive,
@@ -96,6 +108,7 @@ def ingest_silver(day: date = None, init: bool = False):
         """,
         [snapshot_date],
     )
+    log_snapshot(con, "silver_airports", snapshot_date)
 
     con.unregister("snapshot")
     con.close()

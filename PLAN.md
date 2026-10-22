@@ -76,7 +76,7 @@ Contenu :
 4. ✅ SCD2 (historique silver + dims gold versionnées + jointure temporelle dans le fait).
    - Helpers génériques dans `common.py` : `update_scd2_history` (clôture/ouverture par `row_hash`), `is_stale_snapshot` / `log_snapshot` (table `silver_load_log` : un snapshot antérieur au dernier chargé est ignoré, ce qui règle le rejeu de l'init de `run_month.py`).
    - `flight_sk` / `passenger_sk` = `version_id` de l'historique (séquence) : clés stables d'une reconstruction gold à l'autre. Validité `[valid_from, valid_to[`, `valid_to` NULL pour la version courante. Les réservations antérieures à la version 1 (464 réservations d'août, avant le snapshot init) sont rattachées à la version 1.
-   - Vérifié : l'état reconstitué depuis l'historique = le snapshot source pour les 31 jours ; 735 versions / 714 vols (21 multi-versions), 2232 / 2221 passagers (11) ; 0 chevauchement ; 0 sk NULL ou orpheline ; `airport_id` = origine de la version réservée ; 3e exécution → seules `silver_load_log` et airports (code fourni, sans garde) bougent, et seulement leurs timestamps.
+   - Vérifié : l'état reconstitué depuis l'historique = le snapshot source pour les 31 jours ; 735 versions / 714 vols (21 multi-versions), 2232 / 2221 passagers (11) ; 0 chevauchement ; 0 sk NULL ou orpheline ; `airport_id` = origine de la version réservée ; 2e exécution → seule `silver_load_log` bouge (après l'alignement d'airports, fait dans un commit séparé : garde-fou + `DO UPDATE ... WHERE`).
 5. Dagster.
 6. `DOCUMENTATION.md`, puis commits par jalon.
 
