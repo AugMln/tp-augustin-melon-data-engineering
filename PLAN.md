@@ -67,7 +67,8 @@ Contenu :
 
 ## Ordre de livraison (relecture à chaque jalon)
 1. ✅ `fetch_csv` + bronze ×4, puis vérification du contenu de `bronze/` (5 fichiers init + 150 journaliers, copie identique à la source, 2e passe sans téléchargement).
-2. Silver flights + passengers + bookings (sans SCD2), puis `run_month.py` complet.
+2. ✅ Silver flights + passengers + bookings (sans SCD2). Testé en bronze+silver seuls (le gold n'existe pas encore) : état actif au 30/09 = snapshot du 30/09, rejeu d'un jour sans effet (timestamps compris), rejeu complet → contenu identique.
+   - ⚠️ Constat pour le jalon 4 : relancer `run_month.py` rejoue l'init **après** le 30/09, ce qui réactive puis re-désactive temporairement des lignes (les timestamps bougent, le contenu final est identique). Avec le SCD2, ce rejeu créerait des versions parasites : il faudra ignorer un snapshot antérieur ou égal au dernier snapshot déjà traité.
 3. Gold (dims + fact + agrégat, version simple sans SCD2).
 4. SCD2 (historique silver + dims gold versionnées + jointure temporelle dans le fait).
 5. Dagster.
