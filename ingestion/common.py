@@ -39,5 +39,26 @@ def fetch_csv(subdir: str, filename: str) -> pd.DataFrame:
     return pd.read_csv(local_path, dtype=str)
 
 
+def age_sql(birth_expr: str, ref_expr: str) -> str:
+    """Expression SQL de l'âge exact (en années révolues) à la date `ref_expr`.
+
+    date_sub compte les années complètes écoulées, contrairement à date_diff qui compte les
+    changements d'année civile (date_diff donnerait 1 an entre le 31/12 et le 01/01).
+    """
+    return f"date_sub('year', {birth_expr}, {ref_expr})"
+
+
+def age_group_sql(age_expr: str) -> str:
+    """Expression SQL de la tranche d'âge, partagée par dim_passenger et fact_booking."""
+    return f"""CASE
+        WHEN {age_expr} < 18 THEN '<18'
+        WHEN {age_expr} < 25 THEN '18-24'
+        WHEN {age_expr} < 35 THEN '25-34'
+        WHEN {age_expr} < 50 THEN '35-49'
+        WHEN {age_expr} < 65 THEN '50-64'
+        ELSE '65+'
+    END"""
+
+
 def get_connection() -> duckdb.DuckDBPyConnection:
     return duckdb.connect(DB_PATH)

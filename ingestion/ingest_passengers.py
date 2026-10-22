@@ -10,10 +10,13 @@ Silver = un schéma unique (union normalisée EN + FR), upsert + désactivation.
 """
 from datetime import date
 
-from common import fetch_csv, get_connection
+from common import age_group_sql, age_sql, fetch_csv, get_connection
 
 # Les passagers viennent de deux systèmes sources, chacun avec son propre export.
 SOURCES = ["en", "fr"]
+
+# Date de référence de l'âge « actuel » dans dim_passenger : dernier jour de la période ingérée.
+AGE_REFERENCE_DATE = date(2025, 9, 30)
 
 PASSENGER_COLS = [
     "first_name", "last_name", "gender", "nationality", "email",
@@ -120,8 +123,23 @@ def ingest_silver(day: date = None, init: bool = False):
 
 
 def ingest_gold():
-    # TODO (jalon 3) : reconstruire dim_passenger à partir de silver_passengers
-    raise NotImplementedError
+    """Reconstruit dim_passenger à partir de l'état courant de silver_passengers."""
+    con = get_connection()
+    # L'âge dépend de la date à laquelle on le calcule : ici une date de référence FIXE (fin de
+    # la période couverte) plutôt que current_date, pour que le gold reste reproductible. L'âge
+    # au moment de chaque réservation, lui, est calculé dans fact_booking.
+    age = age_sql("birth_date", f"DATE '{AGE_REFERENCE_DATE.isoformat()}'")
+    con.execute(f"""
+        CREATE OR REPLACE TABLE dim_passenger AS
+        SELECT
+            passenger_id, first_name, last_name, gender, nationality, email,
+            birth_date, signup_date, source_system,
+            {age} AS age,
+            {age_group_sql(age)} AS age_group,
+            is_active, deleted_date, insert_timestamp, update_timestamp
+        FROM silver_passengers
+    """)
+    con.close()
 
 
 def init():

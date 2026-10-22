@@ -103,8 +103,26 @@ def ingest_silver(day: date = None, init: bool = False):
 
 
 def ingest_gold():
-    # TODO (jalon 3) : reconstruire dim_flight à partir de silver_flights
-    raise NotImplementedError
+    """Reconstruit dim_flight à partir de l'état courant de silver_flights."""
+    con = get_connection()
+    # Durée en minutes : ~28 % des vols arrivent à une heure « antérieure » à leur départ, ce
+    # sont des vols de nuit qui arrivent le lendemain → +1440 min (24 h) quand l'écart est négatif.
+    # Les vols désactivés restent dans la dimension (is_active = false) : des réservations
+    # passées les référencent encore.
+    con.execute("""
+        CREATE OR REPLACE TABLE dim_flight AS
+        SELECT
+            flight_id, flight_number, airline, origin_airport_id, destination_airport_id,
+            flight_date, departure_time, arrival_time,
+            CASE
+                WHEN date_diff('minute', departure_time, arrival_time) < 0
+                    THEN date_diff('minute', departure_time, arrival_time) + 1440
+                ELSE date_diff('minute', departure_time, arrival_time)
+            END AS flight_duration_min,
+            aircraft_type, is_active, deleted_date, insert_timestamp, update_timestamp
+        FROM silver_flights
+    """)
+    con.close()
 
 
 def init():

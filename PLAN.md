@@ -45,6 +45,9 @@ Les squelettes de `ingestion/` sont à compléter : `fetch_csv`, les 4 `ingest_b
 - Tranches d'âge, à définir dans une macro ou fonction partagée : `<18`, `18-24`, `25-34`, `35-49`, `50-64`, `65+`.
 - `agg_revenue_daily_airline` : construite dans `ingest_bookings.ingest_gold`, après `fact_booking`. Contenu : `booking_date`, `airline`, `nb_bookings`, `revenue_eur` + timestamps. Bookings étant la dernière entité de `run_month.py`, toutes les dimensions sont déjà à jour à ce moment-là.
 - Toutes les tables gold sont reconstruites avec `CREATE OR REPLACE`. Gold = fonction de l'état silver, donc idempotent.
+  - Exception : `dim_date` (construite dans `ingest_bookings.ingest_gold`) est en insert seul (`ON CONFLICT DO NOTHING`). Une date ne change jamais, et une reconstruction réécrirait son `insert_timestamp` à chaque exécution.
+  - Timestamps du gold : ceux du silver source (dims, fait). Pour l'agrégat : `min(insert_timestamp)` / `max(update_timestamp)` des réservations agrégées.
+  - Helpers SQL partagés dans `common.py` : `age_sql` (âge exact via `date_sub`) et `age_group_sql`.
 
 ### 4. Bonus Dagster — `dagster_pipeline/definitions.py`
 - `DailyPartitionsDefinition(start_date="2025-09-01", end_date="2025-10-01")`.
@@ -69,7 +72,7 @@ Contenu :
 1. ✅ `fetch_csv` + bronze ×4, puis vérification du contenu de `bronze/` (5 fichiers init + 150 journaliers, copie identique à la source, 2e passe sans téléchargement).
 2. ✅ Silver flights + passengers + bookings (sans SCD2). Testé en bronze+silver seuls (le gold n'existe pas encore) : état actif au 30/09 = snapshot du 30/09, rejeu d'un jour sans effet (timestamps compris), rejeu complet → contenu identique.
    - ⚠️ Constat pour le jalon 4 : relancer `run_month.py` rejoue l'init **après** le 30/09, ce qui réactive puis re-désactive temporairement des lignes (les timestamps bougent, le contenu final est identique). Avec le SCD2, ce rejeu créerait des versions parasites : il faudra ignorer un snapshot antérieur ou égal au dernier snapshot déjà traité.
-3. Gold (dims + fact + agrégat, version simple sans SCD2).
+3. ✅ Gold (dims + fact + agrégat, version simple sans SCD2, clés naturelles). `run_month.py` complet ×2 sans erreur. 38 930 réservations, 0 doublon, 0 FK orpheline, durées entre 60 et 780 min, 81 aéroports actifs, 696 vols actifs / 714, CA fait = CA agrégat.
 4. SCD2 (historique silver + dims gold versionnées + jointure temporelle dans le fait).
 5. Dagster.
 6. `DOCUMENTATION.md`, puis commits par jalon.
